@@ -4,7 +4,10 @@ import { db } from "@/db"
 import { patientTable } from "@/db/schema/patient"
 import { usersTable } from "@/db/schema/users"
 import { rsTable } from "@/db/schema/rs"
-import { createEncounter } from "@/services/encounterService"
+import {
+  createEncounter,
+  createEncounterSchema,
+} from "@/services/encounterService"
 
 function deepError(err: unknown): unknown {
   if (!(err instanceof Error)) return String(err)
@@ -18,14 +21,18 @@ function deepError(err: unknown): unknown {
 
 /**
  * Replay createEncounter end-to-end with hardcoded inputs (the existing
- * patient + user from the DB). Cleans up after itself. Surfaces actual
- * error chain in JSON so we can diagnose without Vercel log access.
+ * patient + user from the DB). Two test modes via ?mode= query:
+ * - mode=service (default): direct service call
+ * - mode=action: simulate FormData → Zod → service (the actual action flow)
+ *
+ * Cleans up after itself. Surfaces actual error chain in JSON.
  */
-export async function GET() {
-  const steps: Record<string, unknown> = {}
+export async function GET(request: Request) {
+  const url = new URL(request.url)
+  const mode = url.searchParams.get("mode") || "service"
+  const steps: Record<string, unknown> = { mode }
 
   try {
-    // Find first available user + first patient + RS
     const [user] = await db.select().from(usersTable).limit(1)
     const [rs] = await db.select().from(rsTable).limit(1)
     const [patient] = await db
@@ -38,50 +45,69 @@ export async function GET() {
 
     steps.fixtures = {
       userId: user?.id,
-      userEmail: user?.email,
       rsId: rs?.id,
       patientId: patient?.id,
-      patientNama: patient?.namaLengkap,
     }
 
     if (!user || !rs || !patient) {
-      return NextResponse.json(
-        { ok: false, error: "fixtures missing", steps },
-        { status: 200 },
-      )
+      return NextResponse.json({ ok: false, error: "fixtures missing", steps })
     }
 
-    // Replay the encounter create
-    const input = {
-      patientId: patient.id,
-      tanggalKunjungan: new Date().toISOString(),
-      jenisKunjungan: "rawat_jalan" as const,
-      keluhanUtama: "Health endpoint replay test",
-      dataKlinis: undefined,
+    let parsedInput: Record<string, unknown>
+
+    if (mode === "action") {
+      // Simulate the action's FormData processing exactly
+      const fd = new FormData()
+      fd.append("patientId", patient.id)
+      fd.append("tanggalKunjungan", new Date().toISOString().slice(0, 16)) // datetime-local format
+      fd.append("jenisKunjungan", "rawat_jalan")
+      fd.append("keluhanUtama", "Action flow replay")
+
+      const raw = {
+        patientId: String(fd.get("patientId") ?? "").trim(),
+        tanggalKunjungan:
+          String(fd.get("tanggalKunjungan") ?? "").trim() ||
+          new Date().toISOString(),
+        jenisKunjungan: String(fd.get("jenisKunjungan") ?? "").trim(),
+        keluhanUtama:
+          String(fd.get("keluhanUtama") ?? "").trim() || undefined,
+      }
+      steps.raw = raw
+
+      const parsed = createEncounterSchema.safeParse(raw)
+      if (!parsed.success) {
+        steps.parseError = parsed.error.issues
+        return NextResponse.json({ ok: false, steps })
+      }
+      parsedInput = parsed.data
+      steps.parsed = parsedInput
+    } else {
+      parsedInput = {
+        patientId: patient.id,
+        tanggalKunjungan: new Date().toISOString(),
+        jenisKunjungan: "rawat_jalan",
+        keluhanUtama: "Service replay",
+      }
+      steps.input = parsedInput
     }
-    steps.input = input
 
     const encounter = await createEncounter(
       { userId: user.id, rsId: rs.id },
-      input,
+      parsedInput as Parameters<typeof createEncounter>[1],
     )
-
     steps.created = {
       id: encounter.id,
       nomorKunjungan: encounter.nomorKunjungan,
       version: encounter.version,
     }
 
-    // Cleanup — delete the test encounter
+    // Cleanup
     const { encounterTable } = await import("@/db/schema/encounter")
     await db.delete(encounterTable).where(eq(encounterTable.id, encounter.id))
     steps.cleanup = "ok"
 
-    return NextResponse.json({ ok: true, steps }, { status: 200 })
+    return NextResponse.json({ ok: true, steps })
   } catch (err) {
-    return NextResponse.json(
-      { ok: false, steps, error: deepError(err) },
-      { status: 200 },
-    )
+    return NextResponse.json({ ok: false, steps, error: deepError(err) })
   }
 }
