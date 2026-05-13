@@ -251,19 +251,30 @@ These actions require Owner — they cannot be executed from sandbox:
 
 ### Session 1 closeout status
 
-**Demo-ready scope:** Patient registration + audit trail (signup → login →
-create patient → edit patient → see audit trail with version increment).
-This subset proves the value proposition for stakeholders (Karumkit / Sie
-Renbang Angga).
+**Demo-ready scope:** Full P3-D narrative — signup → login → create patient
+→ edit → audit trail → kunjungan baru → close → audit log. All pillars of
+the value proposition for Karumkit / Sie Renbang Angga demoable.
 
-**Deferred to Session 2:**
-- Encounter create + close + cancel (P3-D narrative)
-- Cross-encounter list, audit log universal viewer
-- Smoke test steps 5-9
+**Verified working live (Owner-tested):**
+- Auth flow (signup, login, session)
+- Patient CRUD + audit + version increment
+- Encounter create (after Bug 5 resolved with Vercel log access)
 
-**Session 2 P0:** Resolve encounter create with Vercel logs access. See
-`SESSION-1-EXIT-ADDENDUM.md` for detailed bug investigation log + Session 2
-priority order.
+**Untested but expected to work (Session 2 P0):**
+- Encounter close + cancel (state transitions)
+- Cross-encounter list + filter
+- Universal audit log viewer
+- Logout
+
+**All 6 deploy bugs resolved:**
+1. Middleware /signup whitelist
+2. Postgres SSL config
+3. Supavisor pooler hostname (aws-0 → aws-1)
+4. SET LOCAL → set_config()
+5. `export type` re-export in "use server" file (resolved last, root cause via Vercel log screenshot)
+6. base-ui render prop pattern (pre-deploy)
+
+**Session 2 priorities:** see `SESSION-1-EXIT-ADDENDUM.md` P0-P4.
 
 ---
 
