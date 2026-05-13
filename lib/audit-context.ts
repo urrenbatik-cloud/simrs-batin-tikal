@@ -40,8 +40,15 @@ export async function withAuditContext<T>(
   fn: (tx: Tx) => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
-    // SET LOCAL — confined to this transaction, auto-cleared on COMMIT/ROLLBACK
-    await tx.execute(sql`SET LOCAL app.current_user_id = ${userId}`)
+    // Use set_config() function instead of SET LOCAL statement because
+    // PostgreSQL's SET LOCAL doesn't support bind parameters ($1) — Drizzle's
+    // sql template inlines values as parameters, which `SET LOCAL` rejects.
+    // set_config(setting, value, is_local) is a regular function call that
+    // accepts parameters cleanly. is_local=true makes it transaction-scoped
+    // (auto-cleared on COMMIT/ROLLBACK), equivalent to SET LOCAL semantics.
+    await tx.execute(
+      sql`SELECT set_config('app.current_user_id', ${userId}, true)`,
+    )
     return fn(tx)
   })
 }
@@ -56,7 +63,9 @@ export async function withReadContext<T>(
 ): Promise<T> {
   return db.transaction(async (tx) => {
     if (userId) {
-      await tx.execute(sql`SET LOCAL app.current_user_id = ${userId}`)
+      await tx.execute(
+        sql`SELECT set_config('app.current_user_id', ${userId}, true)`,
+      )
     }
     return fn(tx)
   })
