@@ -12,7 +12,12 @@ import {
 } from "@/services/encounterService"
 import { requireSession } from "@/lib/session"
 import type { ActionState } from "./patient-actions"
-export type { ActionState }
+// NOTE: do NOT `export type { ActionState }` from this file. Next.js "use
+// server" modules forbid non-Server-Action exports. Turbopack incorrectly
+// includes type re-exports in the runtime bundle and references them as
+// values, causing a ReferenceError at module evaluation time (Bug 5 of
+// Session 1). Client components that need ActionState should import it
+// directly from "./patient-actions".
 
 export async function createEncounterAction(
   _prev: ActionState | null,

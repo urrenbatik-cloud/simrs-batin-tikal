@@ -25,11 +25,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import {
-  createEncounterAction,
-  type ActionState,
-} from "@/app/actions/encounter-actions" //  re-exported via patient-actions
-// note: ActionState re-exported from patient-actions intentionally
+import { createEncounterAction } from "@/app/actions/encounter-actions"
+import type { ActionState } from "@/app/actions/patient-actions"
+// ActionState is imported from patient-actions (where it's originally defined).
+// Importing types from a "use server" file is unsafe in Next.js + Turbopack —
+// see encounter-actions.ts header comment for full background.
 
 interface Props {
   patientId: string
