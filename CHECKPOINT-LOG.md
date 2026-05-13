@@ -432,6 +432,78 @@ Per Session 1 EXIT recommendation: prefer **Option A** first — get stakeholder
 
 Comparable with Phase 2.4 success template (Owner Policy §Q): "~6-7 turns mid-session continuation."
 
+### CP-2.7 — P2 + P3 Deliverables (Session 2 extended)
+
+After Session 2 closeout commit, Owner asked to continue with Option A
+within remaining session budget. Per self-assessment §V.5: P2 + P3
+together estimated ~25-30% remaining capacity — fit cleanly. P1.3 (real
+DB integration tests) explicitly deferred to Session 3 as significant
+work needing fresh budget + design decision (testcontainers vs
+Management API harness).
+
+**P2 — `vercel dev` setup** (`docs/LOCAL-DEV-SETUP.md`, 142 lines)
+
+Step-by-step guide for Owner to install Vercel CLI, link project, pull
+env vars, and run local dev with production parity. Includes:
+  * Prerequisites (Node 22+, Vercel account)
+  * 5-step setup sequence (install → login → link → env pull → run)
+  * Iteration loop comparison: ~10 min/cycle (push-deploy-test) vs
+    ~30 sec/cycle (save-reload-test)
+  * Troubleshooting (auth issues, empty env pull, port conflicts)
+  * Security notes (`.env.local` hygiene, key rotation)
+  * AI session implications (faster bug feedback via local error stacks)
+
+Expected payoff: every future runtime bug surfaces in seconds instead
+of 2-3 min Vercel deploy cycles. Major time-saver for Session 3+
+implementation work.
+
+**P3 — Stakeholder demo prep** (2 files)
+
+(a) `docs/DEMO-SCRIPT.md` (111 lines) — Demo flow script for dr Ferry
+to use with Karumkit / Sie Renbang Angga / staff. Two versions:
+
+  * **5-minute version**: opening + 3 pillars (audit attribution,
+    Encounter-as-Convergence, modern UX + multi-RS). Each pillar 1-2 min
+    with specific click-flow.
+  * **15-minute version**: includes optimistic locking demo, health
+    endpoints, architecture explanation, anticipated Q&A (7 questions
+    pre-scripted including "vs Khanza", "cost", "security", "what if
+    dr Ferry leaves").
+
+Includes pre-demo checklist (5 min before stakeholder arrives) +
+"Catatan untuk dr Ferry" with discipline reminders (no over-promise,
+highlight Itjenad angle, willing to say "tidak tahu").
+
+(b) `docs/KARUMKIT-BRIEF.md` (101 lines) — 1-page Karumkit briefing
+handout (markdown source, printable). Structure:
+
+  * "Apa Ini?" — single paragraph positioning
+  * Three differentiators with concrete value framing (Itjenad/BPK
+    audit, web access vs install-per-PC, multi-RS schema)
+  * Live capabilities table (7 items, all ✅)
+  * Phase 2.2+ roadmap table (5 items with estimates)
+  * SIMRS BT vs vendor comparison table (8 dimensions, honest about
+    vendor maturity advantage)
+  * Operational cost reality (Rp 0/bulan saat ini, scaling estimate)
+  * Three asks to Karumkit (proceed Phase 2.2, formal acknowledgment,
+    consider Kakesdam pilot demo) + "What we're NOT asking" reframe
+
+Tone: formal-but-readable, value-focused, honest about trade-offs.
+Bahasa Indonesia throughout per audience.
+
+**Verification (post-docs creation):**
+  * TS errors: 0 (docs-only changes, no code touched)
+  * Tests: 61 passed / 4 files (unchanged)
+  * Build: untouched (markdown files not in production bundle)
+
+**Session 2 final stats:**
+  * Code commits: 2 (test infra + docs)
+  * Tests: 61 passing, baseline established
+  * Docs: 4 deliverables (CHECKPOINT-LOG update, SESSION-2-EXIT,
+    LOCAL-DEV-SETUP, DEMO-SCRIPT, KARUMKIT-BRIEF)
+  * Owner action items: setup `vercel dev` locally (~5 min, optional
+    but high ROI) + practice demo flow before Karumkit meeting
+
 ---
 
 *End of Session 2 log.*

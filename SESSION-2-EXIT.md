@@ -18,8 +18,12 @@
 | Static check for Bug-5-class issues | ✅ 4 tests; verified via injection test |
 | Service-layer unit tests | ✅ 51 tests (16 encounter + 35 patient schemas) |
 | TS + build verification | ✅ `tsc --noEmit` zero errors; `next build` green |
-| Commit + push per §J | ✅ This turn |
-| CHECKPOINT-LOG updated | ✅ §CP-2.1 → §CP-2.6 |
+| Commit + push per §J | ✅ Two commits pushed (`ee66d4c` feat + `1387a19` docs) |
+| CHECKPOINT-LOG updated | ✅ §CP-2.1 → §CP-2.7 |
+| **P2 — `vercel dev` setup guide** | ✅ `docs/LOCAL-DEV-SETUP.md` |
+| **P3 — Demo script (5-min + 15-min)** | ✅ `docs/DEMO-SCRIPT.md` |
+| **P3 — Karumkit 1-pager handout** | ✅ `docs/KARUMKIT-BRIEF.md` |
+| **P1.3 — Integration tests** | ⏳ Deferred to Session 3 (design decision needed) |
 
 ## Test Baseline (Session 2 → Session 3 invariant)
 
@@ -79,6 +83,7 @@ npm run test:coverage # vitest run --coverage
 
 ## Files Created This Session
 
+Test infrastructure (committed as `ee66d4c`):
 ```
 vitest.config.ts                          # config + path alias + server-only stub
 tests/setup.ts                            # env var stubs before module evaluation
@@ -89,11 +94,13 @@ tests/unit/encounter-schemas.test.ts      # 16 tests
 tests/unit/patient-schemas.test.ts        # 35 tests
 ```
 
-Files modified:
+Documentation (committed as `1387a19` + this turn):
 ```
-package.json       # +4 test scripts; +vitest, +@vitest/coverage-v8 devDeps
-package-lock.json  # auto-resolved
-CHECKPOINT-LOG.md  # Session 2 entry appended
+SESSION-2-EXIT.md                         # this file
+CHECKPOINT-LOG.md                         # MOD — Session 2 entries CP-2.1 to CP-2.7
+docs/LOCAL-DEV-SETUP.md                   # P2 — vercel dev guide for Owner
+docs/DEMO-SCRIPT.md                       # P3 — 5-min + 15-min demo scripts
+docs/KARUMKIT-BRIEF.md                    # P3 — 1-page Karumkit handout
 ```
 
 ## Session 3 Recommendations
