@@ -18,30 +18,35 @@ export async function createEncounterAction(
   _prev: ActionState | null,
   formData: FormData,
 ): Promise<ActionState> {
-  const session = await requireSession()
-
-  const raw = {
-    patientId: String(formData.get("patientId") ?? "").trim(),
-    tanggalKunjungan:
-      String(formData.get("tanggalKunjungan") ?? "").trim() ||
-      new Date().toISOString(),
-    jenisKunjungan: String(formData.get("jenisKunjungan") ?? "").trim(),
-    keluhanUtama: String(formData.get("keluhanUtama") ?? "").trim() || undefined,
-  }
-
-  const parsed = createEncounterSchema.safeParse(raw)
-  if (!parsed.success) {
-    return {
-      success: false,
-      message: "Validasi gagal.",
-      fieldErrors: parsed.error.flatten().fieldErrors as Record<
-        string,
-        string[]
-      >,
-    }
-  }
-
   try {
+    const session = await requireSession()
+
+    const raw = {
+      patientId: String(formData.get("patientId") ?? "").trim(),
+      tanggalKunjungan:
+        String(formData.get("tanggalKunjungan") ?? "").trim() ||
+        new Date().toISOString(),
+      jenisKunjungan: String(formData.get("jenisKunjungan") ?? "").trim(),
+      keluhanUtama:
+        String(formData.get("keluhanUtama") ?? "").trim() || undefined,
+    }
+
+    const parsed = createEncounterSchema.safeParse(raw)
+    if (!parsed.success) {
+      return {
+        success: false,
+        message:
+          "Validasi gagal: " +
+          parsed.error.issues
+            .map((i) => `${i.path.join(".")}: ${i.message}`)
+            .join("; "),
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
+      }
+    }
+
     const encounter = await createEncounter(
       { userId: session.userId, rsId: session.rsId },
       parsed.data,
@@ -49,11 +54,18 @@ export async function createEncounterAction(
     revalidatePath(`/patients/${parsed.data.patientId}`)
     return { success: true, patientId: encounter.patientId }
   } catch (err) {
-    console.error("[createEncounterAction]", err)
-    return {
-      success: false,
-      message: err instanceof Error ? err.message : "Unknown error",
+    // EVERY path returns ActionState — never let exceptions escape.
+    // The Vercel 500 page would otherwise be shown if anything throws.
+    console.error("[createEncounterAction] uncaught:", err)
+    const message = err instanceof Error ? err.message : String(err)
+    // Include cause chain for diagnosis
+    let causeMsg = ""
+    if (err instanceof Error && (err as Error & { cause?: unknown }).cause) {
+      const c = (err as Error & { cause?: unknown }).cause
+      causeMsg =
+        " | cause: " + (c instanceof Error ? c.message : String(c)).slice(0, 200)
     }
+    return { success: false, message: `Error: ${message}${causeMsg}` }
   }
 }
 
@@ -62,9 +74,8 @@ export async function closeEncounterAction(
   expectedVersion: number,
   patientId: string,
 ): Promise<ActionState> {
-  const session = await requireSession()
-
   try {
+    const session = await requireSession()
     await closeEncounter(
       { userId: session.userId, rsId: session.rsId },
       encounterId,
@@ -80,10 +91,10 @@ export async function closeEncounterAction(
     ) {
       return { success: false, message: err.message }
     }
-    console.error("[closeEncounterAction]", err)
+    console.error("[closeEncounterAction] uncaught:", err)
     return {
       success: false,
-      message: err instanceof Error ? err.message : "Unknown error",
+      message: err instanceof Error ? err.message : String(err),
     }
   }
 }
@@ -93,9 +104,8 @@ export async function cancelEncounterAction(
   expectedVersion: number,
   patientId: string,
 ): Promise<ActionState> {
-  const session = await requireSession()
-
   try {
+    const session = await requireSession()
     await cancelEncounter(
       { userId: session.userId, rsId: session.rsId },
       encounterId,
@@ -111,10 +121,10 @@ export async function cancelEncounterAction(
     ) {
       return { success: false, message: err.message }
     }
-    console.error("[cancelEncounterAction]", err)
+    console.error("[cancelEncounterAction] uncaught:", err)
     return {
       success: false,
-      message: err instanceof Error ? err.message : "Unknown error",
+      message: err instanceof Error ? err.message : String(err),
     }
   }
 }
