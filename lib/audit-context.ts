@@ -3,8 +3,14 @@
  *
  * Per Blueprint v2.0 §5.6.1: BEFORE INSERT/UPDATE triggers populate audit
  * columns by reading current_setting('app.current_user_id', true). This helper
- * wraps a service call in a transaction with SET LOCAL so the trigger has
- * what it needs.
+ * wraps a service call in a transaction that calls set_config() to populate
+ * that setting transaction-locally, so the trigger has what it needs.
+ *
+ * Note: we use set_config(setting, value, is_local) rather than the SQL
+ * statement `SET LOCAL <name> = <value>` because the SET statement doesn't
+ * accept bind parameters, but Drizzle's sql template always parameterizes.
+ * set_config() with is_local=true has identical semantics (auto-cleared on
+ * COMMIT/ROLLBACK).
  *
  * Use pattern (from Server Actions / Route Handlers):
  *
@@ -29,7 +35,8 @@ export type Tx = PgTransaction<
 >
 
 /**
- * Execute callback inside a transaction with SET LOCAL app.current_user_id.
+ * Execute callback inside a transaction with app.current_user_id set
+ * via set_config() (transaction-scoped, matches SET LOCAL semantics).
  *
  * If userId is null/undefined, the audit triggers will raise. Service layer
  * therefore MUST always have a resolved user id from auth before calling
