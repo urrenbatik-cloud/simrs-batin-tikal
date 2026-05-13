@@ -58,7 +58,9 @@ export function NewEncounterDialog({ patientId, patientNama }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button><Plus className="size-4" /> Kunjungan Baru</Button>} />
+      <DialogTrigger render={<Button />}>
+        <Plus className="size-4" /> Kunjungan Baru
+      </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Kunjungan Baru</DialogTitle>

@@ -67,12 +67,10 @@ export function EncounterActions({ encounter, patientId }: Props) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon" disabled={isPending}>
-            <MoreHorizontal className="size-4" />
-          </Button>
-        }
-      />
+        render={<Button variant="ghost" size="icon" disabled={isPending} />}
+      >
+        <MoreHorizontal className="size-4" />
+      </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={handleClose}>Tutup Kunjungan</DropdownMenuItem>
         <DropdownMenuItem onClick={handleCancel} variant="destructive">
