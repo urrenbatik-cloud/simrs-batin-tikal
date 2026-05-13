@@ -19,12 +19,23 @@ if (!connectionString) {
   throw new Error("DATABASE_URL not set")
 }
 
-// `prepare: false` recommended for Supavisor transaction pooler
-// (prepared statements not supported across pooled connections).
+// Supavisor pooler REQUIRES SSL. postgres.js doesn't enable SSL by default
+// unless URL has ?sslmode=require OR ssl option passed explicitly.
+// We pass it explicitly to avoid relying on URL formatting in env vars.
+//
+// `prepare: false` is mandatory for Supavisor transaction pooler — prepared
+// statements aren't supported across pooled connections.
+//
+// `max: 1` because each serverless invocation creates its own client; no need
+// to pool within a single Lambda execution.
 const queryClient = postgres(connectionString, {
   prepare: false,
-  // Connection pool size — serverless = 1 per invocation typically
   max: 1,
+  ssl: "require",
+  // Surface connection errors with context (vs silent timeouts)
+  connect_timeout: 10,
+  idle_timeout: 20,
+  onnotice: () => {}, // suppress NOTICE noise
 })
 
 export const db = drizzle(queryClient, { schema })
