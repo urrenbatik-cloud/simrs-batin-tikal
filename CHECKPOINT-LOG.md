@@ -208,23 +208,62 @@ These actions require Owner — they cannot be executed from sandbox:
 | Phase E UI pages | 4 |
 | Typecheck + build fixes (LinkButton + Form imports + dialog render) | 2 |
 | Docs + handoff | 2 |
-| **Total** | **~17 turns** |
+| **Sub-total: Build phase** | **~17 turns** |
+| Supabase setup via Management API (Owner authorized sbp_ token) | 2 |
+| Vercel deploy + DATABASE_URL fix (aws-0 → aws-1) | 2 |
+| Smoke test live: middleware /signup + db SSL + set_config fixes | 6 |
+| Encounter bug investigation (unresolved — Vercel logs blocked) | 5 |
+| Session 1 EXIT addendum + final closeout | 2 |
+| **Sub-total: Live debug phase** | **~17 turns** |
+| **Total Session 1** | **~34 turns** |
 
 ### Lessons codified
 
 1. **Sandbox network blocks Postgres ports** (5432/6543) — strategy: hand-write
-   SQL + Owner-paste in Dashboard. Aligns naturally with §L.4 audit safeguards.
+   SQL + Owner-paste in Dashboard initially, then shift to Management API via
+   `sbp_` token when Owner authorized. The Management API proved efficient
+   (HTTPS 443 always accessible from sandbox).
 2. **shadcn v3 + base-ui is NOT Radix** — `asChild` → `render` prop; subtle
    semantic difference (content goes as outer children, not inside the render
    slot). Worth a checklist for future UI work.
 3. **shadcn CLI can silently fail** on some components (Form) — fall back to
    manual install.
-4. **`SET LOCAL` + explicit transaction is reliable through Supavisor
-   transaction pooler** when `prepare: false` is configured — design assumption
-   for `withAuditContext`. Runtime verification pending Vercel deploy.
-5. **In-session commit principle worked here** — committed after Phase C+B as
-   one chunk, then services+UI as second chunk, instead of holding everything
-   to a final big-bang commit.
+4. **Drizzle `sql\`SET LOCAL ...\`` template ALWAYS parameterizes** — Postgres
+   rejects. Switch to `set_config()` function call. Mistake-class lesson:
+   any time we use template literals in ORM SQL for non-DML operations,
+   verify the compiled SQL is actually valid Postgres syntax.
+5. **Supabase pooler hostname is non-deterministic** — never construct from
+   doc pattern (`aws-0-{region}`). Always pull from Dashboard. This burned
+   us via DATABASE_URL with wrong hostname; Owner had to manually fix in
+   Vercel.
+6. **Sandbox can't read Vercel function logs** — this blocked resolving the
+   final encounter create bug. Session 2 P0: get Vercel API token from Owner
+   OR setup `vercel dev` locally.
+7. **`/api/health` debug endpoints are force multipliers** — added two
+   (`/api/health` + `/api/health/encounter`) and they let us diagnose 4 of 5
+   live bugs without needing Vercel logs. Keep them in the codebase. Future
+   modules: add corresponding health endpoints.
+8. **Defensive try/catch around entire Server Action body is the right
+   pattern** for non-redirect actions — surfaces errors to UI toast instead
+   of Vercel 500. But it doesn't help if the error is OUTSIDE the action
+   (middleware, module-level, page render). Need different observability
+   for those.
+
+### Session 1 closeout status
+
+**Demo-ready scope:** Patient registration + audit trail (signup → login →
+create patient → edit patient → see audit trail with version increment).
+This subset proves the value proposition for stakeholders (Karumkit / Sie
+Renbang Angga).
+
+**Deferred to Session 2:**
+- Encounter create + close + cancel (P3-D narrative)
+- Cross-encounter list, audit log universal viewer
+- Smoke test steps 5-9
+
+**Session 2 P0:** Resolve encounter create with Vercel logs access. See
+`SESSION-1-EXIT-ADDENDUM.md` for detailed bug investigation log + Session 2
+priority order.
 
 ---
 
