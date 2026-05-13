@@ -278,4 +278,161 @@ the value proposition for Karumkit / Sie Renbang Angga demoable.
 
 ---
 
-*End of Session 1 log.*
+## Session 2 — P0 Verification + Test Safety Net (P1.1 + P1.2)
+
+**Tanggal:** 14 Mei 2026
+**Owner:** dr Ferry
+**AI:** Claude (active dev partner)
+**Predecessor:** Session 1 closeout (commit `fc220f9`)
+**Goal:** (1) Verify P0 smoke test gap, (2) establish Vitest safety net catching Bug-5-class issues at CI time, (3) keep MVP scope honored (no scope creep)
+
+### CP-2.1 — Bootstrap + Live State Diagnostic
+
+Token verification per Owner Policy §L.2 (all alive, masked logs):
+- Supabase Management API (`sbp_***`): project `simrs-batin-tikal` ACTIVE_HEALTHY, region ap-southeast-1
+- GitHub PAT (`ghp_***`): HTTP 200 on repo, HEAD `fc220f9` matches Session 1 closeout
+- Vercel API (`vcp_***`): HTTP 200
+
+Repo clone with PAT-via-env pattern per §J.3; PAT scrubbed from `.git/config` immediately after fetch; verified clean.
+
+Live DB snapshot before P0 smoke test (via Management API direct query):
+
+| Table | INSERT | UPDATE | DELETE |
+|---|---|---|---|
+| `encounter` | 9 | **0** | 8 |
+| `patient` | 2 | 2 | 1 |
+
+Discovery: actual P0 gap **narrower than addendum implied**. Step 6 (close encounter) confirmed never tested live — 0 encounter UPDATE rows; the surviving encounter had `status='open' version=1`. Steps 7-9 are UI-only flows (no DB evidence) — needed Owner click-through.
+
+### CP-2.2 — P0 Smoke Test (Owner-Side, Verified Post-Hoc)
+
+Owner executed step 6-9 smoke test against `https://simrs-batin-tikal.vercel.app`:
+- Used existing patient `RM-2026-00002` Tn Dummy B2 (created earlier in live testing)
+- Closed kunjungan poli for that patient
+
+Post-test DB verification confirmed:
+- `encounter UPDATE = 1` (was 0) → close transition trigger fired
+- Encounter `20260513-00001-RJ` now `status=closed version=2 closed_at IS NOT NULL closed_by IS NOT NULL`
+- Patient `RM-2026-00002` exists v=2, NIK `1234567890123457`, jenis_kelamin `L`
+
+Steps 7-9 (cross-encounter list, audit viewer, logout) — Owner confirmed "working as expected" verbally.
+
+**P0 status: ✅ All steps verified. No bugs surfaced.**
+
+### CP-2.3 — P1 Scope Refinement (Owner Approved)
+
+Per addendum P1 originally proposed testcontainers Postgres integration tests. Refined for token-budget + sandbox-capability reality:
+
+| P1 sub-task | Decision | Rationale |
+|---|---|---|
+| **P1.1** Build-smoke tests | ✅ Done this session | High value (catches Bug-5-class), low cost (~3 files) |
+| **P1.2** Service-layer unit tests | ✅ Done this session | Zod schema contract tests, no DB needed |
+| **P1.3** Integration tests w/ testcontainers Postgres | ❌ Defer to Session 3 | Heavy (~30% remaining budget), Docker support uncertain in sandbox |
+
+Alternative for P1.3: Supabase Management API as DB-end-to-end harness (saw pattern already works for diagnostic queries in CP-2.1).
+
+### CP-2.4 — P1.1 + P1.2 Implementation
+
+**Vitest setup** (`vitest.config.ts`, `tests/setup.ts`, `tests/stubs/server-only.ts`):
+- `@` path alias matches `tsconfig.json`
+- `server-only` aliased to empty stub (Next.js' runtime guard inappropriate for Node test runtime)
+- `setupFiles` populates `DATABASE_URL` + Supabase env vars BEFORE module evaluation (otherwise db/index.ts throws at import time)
+- `sequence: { concurrent: false }` — Server Action build-smoke tests share module-level side effects; parallel races
+
+**Build-smoke layer** (`tests/build-smoke/`):
+
+1. `server-actions.test.ts` (6 tests) — Imports all 3 Server Action modules + 3 service modules, asserts expected exports exist. Catches: missing imports, syntax errors, runtime side-effects at module body, circular import issues, ReferenceError from misnamed exports.
+
+2. `use-server-static.test.ts` (4 tests) — **Static regex check that actually catches Bug-5-class issues**. Scans every file with `"use server"` directive; rejects:
+   - `export type { X }` re-export form (Bug 5 of Session 1)
+   - `export { type X, ... }` mixed re-export
+   - `export * from "..."` (too permissive)
+   - `export default` (Server Actions should be named)
+
+**Honest correction made mid-execution**: my initial assumption that build-smoke (Vitest module-load) would catch Bug 5 was WRONG. Vitest uses esbuild for TS transform, which properly erases `export type { X }`. Bug 5 is specific to Turbopack (Next.js' production compiler). Verified empirically by injecting Bug 5 form temporarily — module-load test still passed. Then wrote the static regex check, re-injected Bug 5 form, confirmed static check fails with descriptive message: `Found 'export type { ... }' — see Session 1 Bug 5`. Reverted injection cleanly.
+
+**Unit test layer** (`tests/unit/`):
+
+3. `encounter-schemas.test.ts` (16 tests) — Zod contracts for `createEncounterSchema`, `updateEncounterSchema`, `closeEncounterSchema`. Covers: required field rejection, jenisKunjungan enum (4 values: rawat_jalan/rawat_inap/igd/observasi), optimistic-lock `expectedVersion` positive integer.
+
+4. `patient-schemas.test.ts` (35 tests) — Zod contracts for patient schemas. Heavy coverage on:
+   - `nomorRekamMedis` required non-empty
+   - `tanggalLahir` YYYY-MM-DD regex (3 valid forms + 6 invalid forms parameterized)
+   - `jenisKelamin` strict L/P (rejects M, "Laki-laki")
+   - **NIK 16-digit regex** (Indonesian national ID) — accepts valid 16-digit, accepts empty string escape hatch, accepts omitted (optional); rejects 10-digit, 17-digit, letter-containing, separator-containing
+   - `expectedVersion` int positive (rejects 0, -1)
+   - JSONB envelope sub-schemas (`patientAlamatSchema`, `patientKontakSchema` with nested `kontak_darurat`)
+
+### CP-2.5 — Verification Mantra (Per Owner Policy §C)
+
+```
+1. TS errors:    0   (npx tsc --noEmit)
+2. Tests:        61 passed / 4 files
+3. Build:        ✓ Compiled successfully in 24.0s   (with .env.local stub for sandbox)
+```
+
+Baseline established: **61 tests** is the floor for Session 3+; must not decrease.
+
+`package.json` scripts added:
+- `npm test` → `vitest run` (CI)
+- `npm run test:watch` → `vitest` (dev iteration)
+- `npm run test:smoke` → `vitest run tests/build-smoke` (fast pre-deploy)
+- `npm run test:coverage` → `vitest run --coverage`
+
+### CP-2.6 — Commits + Pushes
+
+| Commit | Files | Description |
+|---|---|---|
+| (this turn) | 9 NEW + 2 MOD | feat: test safety net — vitest + 61 tests (build-smoke + unit) + npm scripts |
+| (this turn) | 3 MOD | docs: Session 2 CHECKPOINT-LOG + SESSION-2-EXIT |
+
+Paired commit→push per §J. PAT hygiene verified clean after each push.
+
+### Lessons codified
+
+1. **Vitest module-load tests do NOT catch Turbopack-specific bugs.** TS transform layer matters: Vite/esbuild erases `export type` correctly; Turbopack emits runtime references for it. The right defense for Bug-5-class is **static analysis** (regex on `"use server"` files), not module-import.
+
+2. **Empirical verification of test claims is mandatory.** Initial gut-check ("module-load test catches Bug 5") was wrong. The 30-second injection-test loop (inject the bug form → run test → revert) caught the mistake before it shipped. Worth adding to checklist: any time we claim "this test catches X," temporarily inject X and verify.
+
+3. **Live DB diagnostic via Management API replaces handover-doc claims.** Addendum claimed "untested but expected to work" for steps 6-9. Direct query showed step 6 was the only real gap; steps 7-9 are UI flows that never have DB evidence anyway. Future sessions: when handover says "untested," verify via DB before scoping work — narrower gap = less work.
+
+4. **`server-only` import requires test-runtime neutralization.** All `services/` and `lib/` modules `import "server-only"` which throws if not in Server Component context. Vitest config aliases the package to an empty stub. Add this to the bootstrap checklist for any test work in Next.js App Router projects.
+
+### Session 2 closeout status
+
+**Verified this session:**
+- ✅ P0 smoke test steps 6-9 (Owner-tested + DB-verified via Management API)
+- ✅ Test safety net (61 tests, all categories passing)
+- ✅ Static check for Bug-5-class issues (verified by injection)
+- ✅ TS clean, build green, tests green
+
+**Pending for Session 3:**
+- ⏳ P1.3 — Integration tests with real Postgres (testcontainers OR Management API harness)
+- ⏳ P2 — `vercel dev` local setup (Owner-action, ~5 min: `npm i -g vercel`, `vercel link`, `vercel env pull`)
+- ⏳ P3 — Stakeholder demo prep (5-min flow rehearsal, 1-page Karumkit handout)
+- ⏳ P4 — Vercel API token formalized (already shared this session; rotate per §W.3 fresh-session hygiene)
+
+**Recommendation Session 3:** Pick ONE direction —
+- **Option A** (stabilize, ~1 session): P1.3 integration tests + P2 vercel dev + P3 demo prep
+- **Option B** (Phase 2.2 expansion): Lab modul OR Prescription modul (both FK ke encounter; convergence pattern already established)
+- **Option C** (UX polish): patient bulk operations + print summary + operational dashboard
+
+Per Session 1 EXIT recommendation: prefer **Option A** first — get stakeholder feedback before committing to Option B/C.
+
+### Time profile
+
+| Phase | Approx turns |
+|---|---|
+| Bootstrap (read Owner Policy + Blueprint inventory) | 2 |
+| Token verification + live DB diagnostic | 1 |
+| P1.1 + P1.2 implementation (vitest setup + 4 test files) | 3 |
+| Mid-execution honest correction (Bug 5 catch verification) | 1 |
+| Verification mantra + docs + commits | 2 |
+| **Total Session 2** | **~9 turns** |
+
+Comparable with Phase 2.4 success template (Owner Policy §Q): "~6-7 turns mid-session continuation."
+
+---
+
+*End of Session 2 log.*
+
