@@ -32,7 +32,10 @@ export async function updateSession(request: NextRequest) {
 
   // Auth gating: redirect unauthenticated users to /login (except auth pages + api)
   const pathname = request.nextUrl.pathname
-  const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/auth")
+  const isAuthRoute =
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/signup") ||
+    pathname.startsWith("/auth")
   const isPublic = pathname === "/" || pathname.startsWith("/_next") || pathname.startsWith("/api/health")
 
   if (!user && !isAuthRoute && !isPublic) {
