@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "vitest run tests/build-smoke",
+    "test:integration": "vitest run tests/integration",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
