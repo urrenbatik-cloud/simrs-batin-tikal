@@ -47,11 +47,17 @@ import { randomUUID } from "node:crypto"
 const PROJECT_REF_ENV = "SUPABASE_PROJECT_REF"
 const MGMT_TOKEN_ENV = "SUPABASE_MGMT_TOKEN"
 const DATABASE_URL_ENV = "DATABASE_URL"
+const DIRECT_PG_ENV = "INTEGRATION_DIRECT_POSTGRES"
 
 // A DATABASE_URL that hits localhost or `stub` is the unit-test stub from
 // `tests/setup.ts` — integration tests need a real pooler URL.
 const STUB_URL_MARKERS = ["localhost:5432/stub", "stub:stub@"]
 
+/**
+ * Gates SQL-path integration tests (Management API HTTPS, sandbox-runnable).
+ * Returns true iff SUPABASE_PROJECT_REF, SUPABASE_MGMT_TOKEN, and a
+ * real (non-stub) DATABASE_URL are all present.
+ */
 export function hasIntegrationEnv(): boolean {
   const ref = process.env[PROJECT_REF_ENV]
   const token = process.env[MGMT_TOKEN_ENV]
@@ -59,6 +65,27 @@ export function hasIntegrationEnv(): boolean {
   if (!ref || !token || !dbUrl) return false
   if (STUB_URL_MARKERS.some((m) => dbUrl.includes(m))) return false
   return true
+}
+
+/**
+ * Additional gate for Drizzle-path integration tests. These tests call
+ * service functions (createPatient, etc.) which use the postgres.js driver
+ * over raw TCP to the Supavisor pooler. Environments without TCP egress on
+ * port 6543 (e.g. some CI sandboxes or development containers behind
+ * HTTPS-only egress proxies) will time out.
+ *
+ * Owner opts in by setting INTEGRATION_DIRECT_POSTGRES=1 when running tests
+ * locally (vercel dev, GH Actions runner with full network). Default off:
+ * skip cleanly when not set, so SQL-path tests can still run sandboxed.
+ *
+ * Per `handover/session-3/bundle/03-P1-3-DESIGN-DECISION.md` and Session 3
+ * discovery: the original Approach B design assumed Drizzle path. Hybrid
+ * γ retains it but gates it so it only fires where it can succeed.
+ */
+export function hasDirectPostgresEgress(): boolean {
+  if (!hasIntegrationEnv()) return false
+  const flag = process.env[DIRECT_PG_ENV]
+  return flag === "1" || flag === "true"
 }
 
 function requireEnv(name: string): string {
@@ -118,6 +145,51 @@ export async function runSql<T = Record<string, unknown>>(
 }
 
 /**
+ * Execute SQL with `app.current_user_id` set on the session — mirrors what
+ * `lib/audit-context.ts withAuditContext()` does in production code.
+ *
+ * The audit trigger (`fn_fill_audit_columns`, migration 0001) reads
+ * `current_setting('app.current_user_id', true)` to attribute INSERT/UPDATE
+ * authorship. Service layer calls set_config(..., true) inside a Drizzle
+ * transaction; this helper reproduces that mechanism in test SQL.
+ *
+ * The query is wrapped in BEGIN / SET LOCAL / <user query> / COMMIT.
+ * Reasons:
+ *
+ *   1. SET LOCAL ties the setting to the explicit transaction and clears it
+ *      on COMMIT — identical semantics to the production withAuditContext.
+ *
+ *   2. The Management API SQL endpoint returns the rows of the LAST statement
+ *      that produced any. COMMIT returns nothing, so the API falls back to
+ *      the user's query — which correctly returns its RETURNING rows (or []
+ *      when zero rows matched, as expected for optimistic-lock-style tests).
+ *      Without this wrapping, a UPDATE/DELETE that matched zero rows would
+ *      surface the `set_config()` SELECT row instead of [].
+ *
+ *   3. SET LOCAL accepts a literal value here (no parameter binding through
+ *      Management API), which avoids the constraint that forced production
+ *      code to use set_config(name, value, true) instead (Drizzle's sql
+ *      template always parameterizes — see lib/audit-context.ts comment).
+ */
+export async function runSqlAsUser<T = Record<string, unknown>>(
+  userId: string,
+  query: string,
+): Promise<T[]> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+    throw new Error(`runSqlAsUser: userId is not a UUID: ${userId}`)
+  }
+  // Strip a single trailing semicolon if present so we own statement
+  // delimitation deterministically.
+  const trimmed = query.trim().replace(/;\s*$/, "")
+  return runSql<T>(`
+    BEGIN;
+    SET LOCAL app.current_user_id = '${userId}';
+    ${trimmed};
+    COMMIT;
+  `)
+}
+
+/**
  * Generates a test-isolated prefix for fixture rows. All fixtures created in
  * a test should embed this prefix in a text field (nama_lengkap,
  * keluhan_utama, etc.) so cleanFixtures can find and delete them.
@@ -155,26 +227,21 @@ export async function cleanFixtures(prefix: string): Promise<void> {
     )
   }
 
-  // Encounter first (FK to patient). Match any encounter whose
-  // nomor_kunjungan OR keluhan_utama embeds the prefix.
+  // Batch all teardown into a single Management API call (multi-statement)
+  // to cut latency. Statement order matters:
+  //   1. encounter (FK → patient must go first)
+  //   2. patient
+  //   3. audit_log with immutability trigger bypassed via
+  //      session_replication_role='replica' (test-teardown-only)
   await runSql(`
     DELETE FROM public.encounter
     WHERE keluhan_utama LIKE '${prefix}%'
        OR nomor_kunjungan LIKE '%${prefix}%';
-  `)
 
-  // Patient — match by nomor_rekam_medis or nama_lengkap prefix.
-  await runSql(`
     DELETE FROM public.patient
     WHERE nomor_rekam_medis LIKE '${prefix}%'
        OR nama_lengkap LIKE '${prefix}%';
-  `)
 
-  // audit_log immutability trigger (migration 0001) raises on UPDATE/DELETE.
-  // session_replication_role='replica' suppresses user triggers within the
-  // current session. This is the documented bypass pattern for cleanup —
-  // NEVER do this from application code; only from test teardown.
-  await runSql(`
     SET session_replication_role = 'replica';
     DELETE FROM public.audit_log
     WHERE (table_name = 'patient' OR table_name = 'encounter')

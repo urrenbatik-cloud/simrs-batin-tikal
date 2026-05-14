@@ -33,6 +33,13 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts"],
     setupFiles: ["./tests/setup.ts"],
+    // Integration tests call the Supabase Management API over HTTPS; each
+    // round-trip is ~300-1500 ms depending on payload and queue state.
+    // Default 5 s is too tight for tests that need 4+ sequential calls
+    // (insert + assert + cleanup). Unit tests aren't affected — they run
+    // in <100 ms each and don't approach this ceiling.
+    testTimeout: 20000,
+    hookTimeout: 20000,
     // Server Action build-smoke tests must run sequentially — they `import`
     // modules with module-level side effects. Parallel would race.
     sequence: { concurrent: false },
