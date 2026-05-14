@@ -594,3 +594,147 @@ handover/session-3/
 
 *End of Session 2 log.*
 
+
+---
+
+## Session 3 — P1.3 Integration Tests (Hybrid γ Pattern)
+
+**Tanggal:** 14 Mei 2026
+**Owner:** dr Ferry
+**AI:** Claude (fresh account, working from handover bundle)
+**Predecessor:** Session 2 closeout (`1387a19`)
+**Goal:** Implement P1.3 (integration tests deferred from Session 2) with maximum-coverage Hybrid γ pattern — SQL path runnable in any HTTPS env, Drizzle path runnable in environments with raw pg egress.
+
+### CP-3.1 — Bundle Bootstrap + Compaction-Aware Verification
+
+Mandatory reading order completed (per `00-README-HANDOVER.md`):
+- `00-README-HANDOVER.md` → orientation
+- `01-SESSION-3-BOOTSTRAP.md` → step-by-step verification
+- `02-VERIFICATION-CHECKLIST.md` → expected state matrix
+- `03-P1-3-DESIGN-DECISION.md` → Owner-locked Approach B (Management API harness)
+- `04-CREDENTIALS-MANIFEST.md` → token sources
+- `11-SESSION-2-EXIT.md` + `12-SESSION-1-EXIT.md` → narrative continuity
+- Owner Policy `§B/§J/§L/§P/§V/§W/§X` → operating rules
+
+Bundle integrity: zip SHA256 matches `BUNDLE-HASH.txt`. MANIFEST 42 files verified.
+
+Live state verification (per §B compaction-awareness):
+- Git HEAD `0035893` (bundle commit, +1 from Session 2 baseline; chore-only diff confirmed)
+- Working tree clean
+- npm install OK, **61 baseline tests passing**
+- `tsc --noEmit` zero errors
+- Supabase project `gdihcqizwramcmqinqai` ACTIVE_HEALTHY, ap-southeast-1
+- DB state matches Session 2 EXIT: `encounter UPDATE=1`, `20260513-00001-RJ status=closed v=2`, patient `RM-2026-00002` v=2 NIK `1234567890123457`
+
+**All preconditions for P1.3 satisfied. No drift from Session 2 closeout.**
+
+### CP-3.2 — Sandbox Network Constraint Discovery
+
+While prototyping the harness against a real Supabase instance, discovered that the development sandbox's egress proxy allows HTTPS port 443 only — direct TCP to Postgres protocol (port 6543 Supavisor pooler) is blocked:
+
+```
+Attempt: aws-0-ap-southeast-1.pooler.supabase.com:6543 → CONNECT_TIMEOUT
+Attempt: api.supabase.com:443 → works fine
+```
+
+This meant Approach B's original design (run Drizzle service code against real DB) couldn't be sandbox-verified. Surfaced three options to Owner:
+
+| Option | Description | Trade-off |
+|---|---|---|
+| α | SQL-only via Management API | Sandbox verifiable; misses Drizzle service-layer code |
+| β | Drizzle-only, accept skip in sandbox | Production-fidelity but blind in sandbox; Owner verifies only |
+| **γ** | **Both, gated independently** | **Maximum coverage; more code to maintain** |
+
+**Owner chose γ.** Implementation followed.
+
+### CP-3.3 — Hybrid γ Harness + Patient/Encounter Tests
+
+`tests/integration/harness.ts` implements:
+
+- `hasIntegrationEnv()` — checks SUPABASE_PROJECT_REF + SUPABASE_MGMT_TOKEN + non-stub DATABASE_URL
+- `hasDirectPostgresEgress()` — additionally checks `INTEGRATION_DIRECT_POSTGRES=1` env var; gates Drizzle-path tests
+- `runSql<T>(query)` — POST to `/v1/projects/<ref>/database/query` returning rows
+- `runSqlAsUser(userId, query)` — wraps in `BEGIN; SET LOCAL app.current_user_id='<uid>'; <query>; COMMIT` (mirrors production `withAuditContext`)
+- `testPrefix()` — UUID-prefixed `TEST-{8hex}` for fixture isolation
+- `cleanFixtures(prefix)` — batched single API call: encounter DELETE → patient DELETE → audit_log DELETE (with `session_replication_role='replica'` bypass)
+- `getTestContext()` — cached `{ rsId, userId }` from live dev DB
+- `sqlString(s)` — single-quote-safe escape
+
+Key subtle behavior of Management API multi-statement queries: returns rows of the LAST statement that produced any output. If last returned 0 rows, falls back to previous. Without the COMMIT-terminator pattern, an optimistic-lock test (UPDATE WHERE stale-version returns 0 rows) would falsely surface the `SET LOCAL`/`set_config` row.
+
+Tests created (Commit `2aa8e0c`):
+
+**patient.test.ts (8 SQL pass + 5 Drizzle skip):**
+- SQL: INSERT audit attribution, UPDATE version increment + audit diff, optimistic-lock primitive (UPDATE WHERE stale=0 rows), audit_log immutability rejection, CHECK constraint jenis_kelamin, CHECK constraint NIK, audit context missing fail-loud, soft-delete via deleted_at
+- Drizzle: createPatient typed return, updatePatient version increment, PatientVersionConflictError, PatientNotFoundError, softDeletePatient hides from list
+
+**encounter.test.ts (4 SQL pass + 6 Drizzle skip):**
+- SQL: INSERT with status default 'open', FK constraint to patient, close transition, optimistic lock
+- Drizzle: nomor_kunjungan format (YYYYMMDD-NNNNN-{TYPE}), type-code mapping (RI/IGD/OBS), closeEncounter, EncounterStateError on cancel-after-close, EncounterStateError on update-after-close, EncounterVersionConflictError
+
+Required harness updates surfaced during this work: `runSqlAsUser` rewritten with BEGIN/SET LOCAL/COMMIT wrapping; `cleanFixtures` batched to 1 API call; `vitest.config.ts` testTimeout/hookTimeout bumped to 20s for Management API latency tolerance.
+
+### CP-3.4 — Audit + Auth Tests + Attribution-Swap Drop
+
+Tests created (Commit `7c18c60`):
+
+**audit.test.ts (3 SQL pass + 3 Drizzle skip):**
+- SQL: INSERT+UPDATE attribution + content, old_values NULL on INSERT, occurred_at monotonic across writes
+- Drizzle: getAuditTrailForEntity ordered desc with userEmail join, queryAuditLog tableName filter, queryAuditLog operation filter
+
+Originally drafted a fourth SQL test — "attribution swap" where two different `app.current_user_id` values would update the same row, asserting audit_log captures each user separately. **Dropped** after discovering the audit trigger `fn_fill_audit_columns` overrides `NEW.updated_by` from session var on UPDATE — testing two-user attribution would require seeding a second real user (FK `patient_updated_by_fkey`). The session→audit_log.user_id pipe is already verified by the first SQL test; marginal additional value not worth the FK complexity.
+
+**auth.test.ts (3 SQL pass + 2 Drizzle skip):**
+- SQL: users.email UNIQUE constraint, role values accepted (admin/dokter/perawat/pendaftaran/kasir/auditor), deleted_at IS NULL filter for session resolution
+- Drizzle: users SELECT via Drizzle returns seeded user, deletedAt is NULL for active users
+
+Scope note: full auth flow (Supabase Auth cookie → middleware → session.ts) is E2E territory. These tests verify the DB-side contract the auth code depends on.
+
+Manual users cleanup added (no audit triggers on users table per migration 0001 comment — `cleanFixtures` doesn't reach it; tests track inserted IDs and delete them in afterEach).
+
+### CP-3.5 — Off-Track Diagnostic: Vercel Region Performance
+
+Owner during session asked why SIMRS-BT slower than SIKESUMA at production URL. Provided ranked hypothesis tree:
+
+| # | Hypothesis | Status |
+|---|---|---|
+| 1 | Vercel function region mismatch (us-east) vs Supabase (ap-southeast-1) | **✅ Confirmed root cause** |
+| 2 | 3× sequential `supabase.auth.getUser()` per request (middleware+layout+page) | Future investigation |
+| 3 | `force-dynamic` everywhere | Future investigation |
+| 4 | Cold start on first request | Future investigation |
+| 5 | Heavy UI deps in bundle | Future investigation |
+| 6 | Redundant users SELECT in getCurrentSession | Future investigation |
+
+Owner switched Vercel function region from `iad1` → `sin1` via dashboard. App speed jumped immediately (Owner-confirmed).
+
+Helped Owner navigate Vercel's Redeploy modal which presents Production/Preview as single-select (not the multi-select Owner remembered from initial env-var setup). Explained: Production = live URL slot; Preview = per-PR/per-branch slots; the Redeploy dialog is by-design environment-scoped per operation. Recommended: redeploy Production immediately; skip Preview (next git push auto-creates new preview with sin1).
+
+Optional `vercel.json` `{"regions": ["sin1"]}` for lock-in proposed but deferred — Session 4 candidate, 5-line commit, orthogonal to P1.3 work.
+
+### Session 3 Test Invariant (Session 4 floor)
+
+```
+Default (npm test, no integration env):
+  61 unit pass | 34 integration skip = 95 total
+
+Sandbox integration (env set, no INTEGRATION_DIRECT_POSTGRES):
+  18 SQL pass | 16 Drizzle skip = 34 total
+
+Owner-local full integration (INTEGRATION_DIRECT_POSTGRES=1):
+  34 expected pass | 0 skip
+```
+
+**Per §C: 61 unit tests is the floor. The 34 integration tests are additive. Session 4+ must INCREASE or AT MINIMUM maintain.**
+
+### Session 3 Lessons (for AI continuity)
+
+1. **Probe before designing around assumptions.** When a tool (testcontainers, Drizzle TCP) might not work in the sandbox, probe FIRST with a small isolated test, then design the architecture. Saved ~half a session by discovering the egress constraint before committing to Drizzle-only.
+
+2. **Management API has shape quirks worth knowing.** Multi-statement query returns LAST statement's rows; if last is empty, falls back to previous. This is non-obvious and can mask test failures. The COMMIT-terminator pattern (or any non-returning final statement) is the robust workaround.
+
+3. **Test isolation matters more than test cleverness.** UUID-prefixed fixtures + content-based cleanup match (LIKE `${prefix}%`) is sufficient — no need for transaction-level rollback or schema-per-test gymnastics. Cleanup just has to be reliable and idempotent.
+
+4. **Defer-loud beats skip-silent.** `describe.skipIf(!hasIntegrationEnv())` makes the gate explicit; future contributors see the env vars required in the gate function itself. Better than `describe.skip` toggled by commenting code.
+
+5. **Owner Policy §J paired commit-push is genuinely valuable.** Three commits this session, each pushed within seconds — sandbox dies, work is safe.
+
